@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import axios from "../api/axios";
 import { useToast } from "../context/ToastContext";
 import QRCodeGenerator from "../components/QRCodeGenerator";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function Projects() {
   const [projects, setProjects] = useState([]);
@@ -11,21 +11,45 @@ export default function Projects() {
   const [skillFilter, setSkillFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [qrProject, setQrProject] = useState(null);
-  // BUG FIX: Track already-applied projects from server, not just session
   const [myApplications, setMyApplications] = useState([]);
+  const [highlightedId, setHighlightedId] = useState(null);
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const projectRefs = useRef({});
 
   useEffect(() => {
     const storedUser = JSON.parse(localStorage.getItem("user"));
     if (!storedUser) {
-      navigate("/login");
+      // Save the join param so we can redirect back after login
+      navigate(`/login?redirect=${encodeURIComponent(location.search)}`);
       return;
     }
     setUser(storedUser);
     fetchProjects();
     if (storedUser.role === "student") fetchMyApplications();
   }, []);
+
+  // After projects load, scroll to and highlight the joined project
+  useEffect(() => {
+    if (loading || projects.length === 0) return;
+    const params = new URLSearchParams(location.search);
+    const joinId = params.get("join");
+    if (!joinId) return;
+
+    setHighlightedId(joinId);
+
+    // Wait a tick for refs to be attached
+    setTimeout(() => {
+      const el = projectRefs.current[joinId];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+
+    // Remove highlight after 4 seconds
+    setTimeout(() => setHighlightedId(null), 4000);
+  }, [loading, projects]);
 
   const fetchMyApplications = async () => {
     try {
@@ -105,8 +129,35 @@ export default function Projects() {
         <div className="projects-grid">
           {projects.map((project) => {
             const alreadyApplied = myApplications.includes(project._id);
+            const isHighlighted = highlightedId === project._id;
+
             return (
-              <div key={project._id} className="project-card">
+              <div
+                key={project._id}
+                ref={el => projectRefs.current[project._id] = el}
+                className="project-card"
+                style={isHighlighted ? {
+                  border: "2px solid #3b82f6",
+                  boxShadow: "0 0 0 4px rgba(59,130,246,0.2)",
+                  transform: "scale(1.02)",
+                  transition: "all 0.3s ease",
+                } : { transition: "all 0.3s ease" }}
+              >
+                {isHighlighted && (
+                  <div style={{
+                    background: "#1d4ed8",
+                    color: "white",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: "4px 10px",
+                    borderRadius: 6,
+                    marginBottom: 10,
+                    display: "inline-block",
+                  }}>
+                    📱 You scanned this project's QR code
+                  </div>
+                )}
+
                 <h3>{project.title}</h3>
                 <p>{project.description}</p>
 
@@ -149,9 +200,10 @@ export default function Projects() {
                 <div className="card-actions">
                   {user?.role === "student" && (
                     <button
-                      className={alreadyApplied ? "btn-ghost" : "btn-primary"}
+                      className={alreadyApplied ? "btn-ghost" : isHighlighted ? "btn-primary" : "btn-primary"}
                       onClick={() => !alreadyApplied && applyToProject(project._id)}
                       disabled={alreadyApplied}
+                      style={isHighlighted && !alreadyApplied ? { background: "#1d4ed8", animation: "pulse 1.5s infinite" } : {}}
                     >
                       {alreadyApplied ? "✅ Applied" : "Apply Now"}
                     </button>
@@ -172,6 +224,13 @@ export default function Projects() {
           })}
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.8; }
+        }
+      `}</style>
     </div>
   );
 }
